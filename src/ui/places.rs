@@ -114,11 +114,22 @@ impl PlaceCard {
         fav_btn.connect_clicked(move |_| fp_clone.popup());
         actions.append(&fav_btn);
 
+        let share_btn = gtk::Button::with_label("Share");
+        share_btn.add_css_class("flat");
+        share_btn.set_tooltip_text(Some("Share a link to this place"));
+        actions.append(&share_btn);
+
         content.append(&actions);
         scroller.set_child(Some(&content));
         root.append(&scroller);
 
         let current_place: Rc<RefCell<Option<SearchResult>>> = Rc::new(RefCell::new(None));
+        let cp_share = current_place.clone();
+        share_btn.connect_clicked(move |b| {
+            if let Some(ref p) = *cp_share.borrow() {
+                share_place(p, b);
+            }
+        });
         let cp_dir = current_place.clone();
         directions_btn.connect_clicked(move |_| {
             if let Some(ref p) = *cp_dir.borrow() {
@@ -530,4 +541,30 @@ impl PlacesHubView {
             }
         }
     }
+}
+
+/// A link anyone can open: the place on OpenStreetMap.
+pub fn place_url(lat: f64, lon: f64) -> String {
+    format!("https://www.openstreetmap.org/?mlat={lat:.6}&mlon={lon:.6}#map=17/{lat:.6}/{lon:.6}")
+}
+
+/// Nyx Share's Share Sheet for a link to the place.
+fn share_place(place: &SearchResult, button: &gtk::Button) {
+    let url = place_url(place.lat, place.lon);
+    let button = button.clone();
+    nyx_core::cmd::background(
+        move || {
+            use nyx_share_client::{Client, Content, ShareOptions};
+            let mut content = Content::new();
+            content.url(url);
+            let options = ShareOptions { app_name: Some("Maps".into()), ..Default::default() };
+            Client::connect().and_then(|c| c.share(&content, &options)).map(|_| ()).map_err(|e| e.to_string())
+        },
+        move |result: Result<(), String>| {
+            if let Err(e) = result {
+                button.set_tooltip_text(Some(&format!("Couldn't share: {e}")));
+                eprintln!("nyx-maps: couldn't share: {e}");
+            }
+        },
+    );
 }
