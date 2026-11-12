@@ -61,6 +61,11 @@ pub struct Settings {
     pub work_lat: Option<f64>,
     #[serde(default)]
     pub work_lon: Option<f64>,
+
+    /// When the desktop's location service can't answer, guess from the public IP
+    /// (ipwho.is, then ipapi.co). Off: the IP never leaves for that.
+    #[serde(default)]
+    pub ip_location: bool,
 }
 
 fn default_travel_mode() -> String { "drive".into() }
@@ -110,6 +115,7 @@ impl Default for Settings {
             work_address: String::new(),
             work_lat: None,
             work_lon: None,
+            ip_location: false,
         }
     }
 }

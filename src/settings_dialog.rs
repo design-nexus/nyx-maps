@@ -129,6 +129,13 @@ fn navigation_group(p: &Page) {
         vec![("drive".into(), "Drive".into()), ("walk".into(), "Walk".into()), ("bicycle".into(), "Cycle".into())],
         &current.travel_mode, |id| settings::update(|s| s.travel_mode = id));
     group.add(&row);
+    let (row, _) = widgets::switch_row(
+        "Guess my location from my IP address",
+        "When the location service can't answer. Your IP address goes to ipwho.is or ipapi.co.",
+        current.ip_location,
+        |on| settings::update(|s| s.ip_location = on),
+    );
+    group.add(&row);
     let (row, _) = widgets::choice_row("Map style", "Style used when Maps next opens. You can also change it above the map.",
         vec![("standard".into(), "Standard".into()), ("topographic".into(), "Topographic".into()), ("satellite".into(), "Satellite".into())],
         &current.map_style, |id| settings::update(|s| s.map_style = id));

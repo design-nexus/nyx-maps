@@ -15,10 +15,8 @@ pub async fn request_current_location() -> Result<GeoLocation> {
     // 1. Try GeoClue2 system service with a strict 1s timeout so we never block the UI
     match tokio::time::timeout(Duration::from_millis(1000), request_geoclue_location()).await {
         Ok(Ok(loc)) => Ok(loc),
-        _ => {
-            // 2. Fall back to network IP geolocation
-            request_ip_location().await
-        }
+        _ if crate::settings::get().ip_location => request_ip_location().await,
+        _ => bail!("The location service didn't answer. Turn on Location in the system settings, or let Maps guess from your IP address in its settings."),
     }
 }
 
@@ -219,11 +217,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_current_location() {
-        let loc = request_current_location().await;
-        assert!(loc.is_ok(), "Location should resolve: {:?}", loc.err());
-        let l = loc.unwrap();
-        assert!(l.latitude.is_finite());
-        assert!(l.longitude.is_finite());
-        assert!(l.label.is_some());
+        // Without GeoClue, and with the IP guess off by default, it says why instead.
+        match request_current_location().await {
+            Ok(l) => assert!(l.latitude.is_finite() && l.longitude.is_finite() && l.label.is_some()),
+            Err(e) => assert!(e.to_string().contains("location service"), "{e}"),
+        }
     }
 }
