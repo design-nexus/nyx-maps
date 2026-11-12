@@ -53,7 +53,6 @@ impl MainWindow {
         chrome::set_title(&window, "Maps", "");
 
         let overlay = gtk::Overlay::new();
-        let main_vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
         // --- HEADER ---
         // The app and the side panel's toggle; search in the middle; the map's centre,
@@ -114,13 +113,7 @@ impl MainWindow {
             settings_dialog::open(&overlay_gear, &win_gear, db_gear.clone());
         }));
 
-        main_vbox.append(&header.root);
-
         // --- BODY (SIDE PANEL + MAP) ---
-        let body_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        body_hbox.set_hexpand(true);
-        body_hbox.set_vexpand(true);
-
         // Contextual Side Panel (320px)
         let side_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
         side_panel.add_css_class("context-panel");
@@ -157,8 +150,6 @@ impl MainWindow {
         panel_stack.set_vexpand(true);
         panel_stack.set_size_request(320, -1);
         side_panel.append(&panel_stack);
-
-        body_hbox.append(&side_panel);
 
         // Map View
         let map_view = MapView::new(
@@ -212,10 +203,12 @@ impl MainWindow {
         attribution_lbl.set_ellipsize(gtk::pango::EllipsizeMode::Start);
         attribution_lbl.set_can_target(false);
         map_overlay.add_overlay(&attribution_lbl);
-        body_hbox.append(&map_overlay);
-        main_vbox.append(&body_hbox);
-        overlay.set_child(Some(&main_vbox));
-
+        // The side panel is the frame's sidebar; the map fills the sheet to its edges.
+        let frame = nyx_ui::frame::AppFrame::new(&header.root);
+        frame.set_sidebar(&side_panel);
+        frame.set_page(&map_overlay);
+        frame.set_flush(true);
+        overlay.set_child(Some(&frame.root));
         // Toast label overlay
         let toast_lbl = gtk::Label::new(None);
         toast_lbl.add_css_class("maps-toast");

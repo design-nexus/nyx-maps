@@ -118,7 +118,6 @@ window.maps-window button.map-control-btn:active {
 /* ---------- Side panel ---------- */
 
 .context-panel {
-    background-color: @theme_bg;
     min-width: 320px;
 }
 
