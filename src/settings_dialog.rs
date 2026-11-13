@@ -13,13 +13,13 @@ const GROUPS: &[(&str, &str, &str)] = &[
 /// Every shortcut, for the card's Keyboard group.
 pub const SHORTCUTS: &[(&[&str], &str)] = &[
     (&["Ctrl", "F"], "Focus search bar"),
-    (&["Ctrl", "B"], "Toggle side panel"),
+    (&["Ctrl", "B"], "Collapse the sidebar"),
     (&["Ctrl", "R"], "Open directions"),
     (&["Ctrl", ","], "Open settings"),
     (&["+"], "Zoom in"),
     (&["-"], "Zoom out"),
     (&["F1"], "Show keyboard shortcuts"),
-    (&["Esc"], "Dismiss dialog, panel, or search results"),
+    (&["Esc"], "Close the card or the search results"),
     (&["Ctrl", "Q"], "Quit application"),
 ];
 
@@ -136,8 +136,8 @@ fn navigation_group(p: &Page) {
         |on| settings::update(|s| s.ip_location = on),
     );
     group.add(&row);
-    let (row, _) = widgets::choice_row("Map style", "Style used when Maps next opens. You can also change it above the map.",
-        vec![("standard".into(), "Standard".into()), ("topographic".into(), "Topographic".into()), ("satellite".into(), "Satellite".into())],
+    let (row, _) = widgets::choice_row("Map style", "Style used when Maps next opens. You can also change it on the map.",
+        vec![("standard".into(), "Map".into()), ("topographic".into(), "Terrain".into()), ("satellite".into(), "Satellite".into())],
         &current.map_style, |id| settings::update(|s| s.map_style = id));
     group.add(&row);
     let unit_options = vec![
@@ -184,7 +184,12 @@ fn saved_place_row(group: &widgets::Group, db: &Database, label: &'static str, t
     status.set_xalign(0.0);
     status.add_css_class("dim");
     let message = status.clone();
-    let picker = crate::ui::search::SearchBar::field(db.clone(), "Search an address", std::rc::Rc::new(|| None), move |place| {
+    // Addresses near you (or where the map was) come first.
+    let near = std::rc::Rc::new(|| {
+        let s = settings::get();
+        Some(s.last_current_lat.zip(s.last_current_lon).unwrap_or((s.last_lat, s.last_lon)))
+    });
+    let picker = crate::ui::search::SearchBar::field(db.clone(), "Search an address", near, move |place| {
         match database.add_favorite(&place.name, label, place.lat, place.lon, &place.formatted_address) {
             Ok(_) => message.set_text("Saved"),
             Err(_) => message.set_text("Could not save this place"),

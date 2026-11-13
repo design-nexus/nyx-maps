@@ -1,3 +1,3 @@
 pub mod geoclue;
 
-pub use geoclue::request_current_location;
+pub use geoclue::{GeoLocation, PATIENCE, accuracy_text, locate, request_current_location};

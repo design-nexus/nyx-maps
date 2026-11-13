@@ -47,6 +47,11 @@ pub struct Settings {
     pub last_current_lon: Option<f64>,
     #[serde(default)]
     pub last_current_label: Option<String>,
+    /// How close that fix is, in metres (none from versions that didn't keep it).
+    #[serde(default)]
+    pub last_current_accuracy: Option<f64>,
+    #[serde(default)]
+    pub last_current_from_ip: bool,
 
     #[serde(default)]
     pub home_address: String,
@@ -66,6 +71,10 @@ pub struct Settings {
     /// (ipwho.is, then ipapi.co). Off: the IP never leaves for that.
     #[serde(default)]
     pub ip_location: bool,
+
+    /// The sidebar folded to its icon rail (Ctrl+B).
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
 }
 
 fn default_travel_mode() -> String { "drive".into() }
@@ -109,6 +118,8 @@ impl Default for Settings {
             last_current_lat: None,
             last_current_lon: None,
             last_current_label: None,
+            last_current_accuracy: None,
+            last_current_from_ip: false,
             home_address: String::new(),
             home_lat: None,
             home_lon: None,
@@ -116,6 +127,7 @@ impl Default for Settings {
             work_lat: None,
             work_lon: None,
             ip_location: false,
+            sidebar_collapsed: false,
         }
     }
 }

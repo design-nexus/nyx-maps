@@ -99,6 +99,30 @@ pub async fn handle_cli_api(args: &[String]) -> bool {
             }
             true
         }
+        "locate" => {
+            // One line per fix, each better than the last.
+            let (sender, receiver) = async_channel::unbounded();
+            let finding = crate::location::locate(sender, crate::location::PATIENCE);
+            let printing = async {
+                while let Ok(fix) = receiver.recv().await {
+                    match fix {
+                        Ok(f) => println!(
+                            "{}",
+                            json!({
+                                "latitude": f.latitude,
+                                "longitude": f.longitude,
+                                "accuracy_meters": f.accuracy,
+                                "from_ip": f.from_ip,
+                                "accuracy": crate::location::accuracy_text(f.accuracy, f.from_ip, &settings::get().units),
+                            })
+                        ),
+                        Err(e) => println!("{}", json!({ "error": e.to_string() })),
+                    }
+                }
+            };
+            tokio::join!(finding, printing);
+            true
+        }
         _ => {
             println!("{}", json!({ "error": format!("Unknown API command '{}'", cmd) }));
             true

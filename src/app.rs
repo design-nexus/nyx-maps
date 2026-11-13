@@ -43,10 +43,12 @@ impl MapsApp {
             if win_ref.borrow().is_none() {
                 let win = MainWindow::build(application);
                 win.window.present();
-                // A test copy never asks for the location (a new app ID could prompt).
-                if std::env::var_os("NYX_MAPS_APP_ID").is_none() {
+                // A test copy never asks the location service, only takes a made-up fix.
+                if std::env::var_os("NYX_MAPS_APP_ID").is_none() || crate::test_hooks::fix().is_some() {
                     win.check_location_on_startup();
                 }
+                crate::test_hooks::typing(&win);
+                crate::test_hooks::me_card(&win);
                 *win_ref.borrow_mut() = Some(win);
             } else if let Some(ref win) = *win_ref.borrow() {
                 win.window.present();

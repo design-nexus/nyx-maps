@@ -7,6 +7,7 @@ mod runtime;
 mod settings;
 mod settings_dialog;
 mod storage;
+mod test_hooks;
 mod theme;
 mod ui;
 

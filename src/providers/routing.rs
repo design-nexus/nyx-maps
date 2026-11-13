@@ -42,11 +42,98 @@ impl TravelMode {
     }
 }
 
+/// Which way a step goes, for its icon.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Turn {
+    #[default]
+    Straight,
+    Left,
+    Right,
+    Arrive,
+}
+
+impl Turn {
+    fn from_text(text: &str) -> Self {
+        let t = text.to_lowercase();
+        if t.starts_with("arrive") || t.contains("destination") {
+            Turn::Arrive
+        } else if t.contains("left") {
+            Turn::Left
+        } else if t.contains("right") {
+            Turn::Right
+        } else {
+            Turn::Straight
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Turn::Straight => "maps-straight-symbolic",
+            Turn::Left => "maps-turn-left-symbolic",
+            Turn::Right => "maps-turn-right-symbolic",
+            Turn::Arrive => "maps-pin-symbolic",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouteStep {
     pub instruction: String,
     pub distance_meters: f64,
     pub duration_seconds: f64,
+    #[serde(default)]
+    pub turn: Turn,
+    /// The road the step is on, when the router names it.
+    #[serde(default)]
+    pub street: String,
+}
+
+impl RouteResult {
+    /// The road most of the route is on ("Maple Avenue"), for "via Maple Avenue".
+    pub fn main_road(&self) -> Option<&str> {
+        self.steps
+            .iter()
+            .filter(|s| !s.street.is_empty())
+            .max_by(|a, b| a.distance_meters.total_cmp(&b.distance_meters))
+            .map(|s| s.street.as_str())
+    }
+}
+
+/// The road named in an instruction: what follows "onto" or "on", up to a stop.
+fn street_in(text: &str) -> String {
+    let after = text.split_once(" onto ").or_else(|| text.split_once(" on ")).map(|(_, rest)| rest).unwrap_or("");
+    after.split(['.', ',']).next().unwrap_or("").trim().to_string()
+}
+
+/// A bearing in degrees as a compass word ("north", "southeast").
+fn compass(bearing: f64) -> &'static str {
+    const WORDS: [&str; 8] = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+    WORDS[((bearing.rem_euclid(360.0) + 22.5) / 45.0) as usize % 8]
+}
+
+/// OSRM's maneuver as a sentence: "Turn left onto Birch Street". `bearing` is the
+/// way the step sets off, for the first one.
+fn osrm_instruction(kind: &str, modifier: &str, street: &str, bearing: Option<f64>) -> String {
+    let onto = if street.is_empty() { String::new() } else { format!(" onto {street}") };
+    let way = if modifier.is_empty() || modifier == "straight" { String::new() } else { format!(" {modifier}") };
+    let heading = bearing.map(|b| format!(" {}", compass(b))).unwrap_or_default();
+    match kind {
+        "depart" if street.is_empty() => format!("Head{heading}"),
+        "depart" => format!("Head{heading} on {street}"),
+        "arrive" => match modifier {
+            "left" | "right" => format!("Arrive at your destination, on the {modifier}"),
+            _ => "Arrive at your destination".to_string(),
+        },
+        "turn" | "end of road" if modifier == "uturn" => format!("Make a U-turn{onto}"),
+        "turn" | "end of road" => format!("Turn{way}{onto}"),
+        "new name" | "continue" => format!("Continue{way}{onto}"),
+        "merge" => format!("Merge{way}{onto}"),
+        "on ramp" => format!("Take the ramp{way}{onto}"),
+        "off ramp" => format!("Take the exit{way}{onto}"),
+        "fork" => format!("Keep{way}{onto}"),
+        "roundabout" | "rotary" | "roundabout turn" => format!("At the roundabout, take the exit{onto}"),
+        _ => format!("Continue{way}{onto}"),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +221,7 @@ struct OsrmManeuver {
     #[serde(rename = "type")]
     maneuver_type: Option<String>,
     modifier: Option<String>,
+    bearing_after: Option<f64>,
 }
 
 pub async fn calculate_route(
@@ -185,7 +273,10 @@ pub async fn calculate_route(
                         if let Some(stps) = leg.steps {
                             for s in stps {
                                 if let Some(instr) = s.instruction.and_then(|i| i.text) {
+                                    let instr = instr.trim_end_matches('.').to_string();
                                     steps.push(RouteStep {
+                                        turn: Turn::from_text(&instr),
+                                        street: street_in(&instr),
                                         instruction: instr,
                                         distance_meters: s.distance.unwrap_or(0.0),
                                         duration_seconds: s.time.unwrap_or(0.0),
@@ -235,30 +326,23 @@ pub async fn calculate_route(
                     if let Some(stps) = leg.steps {
                         for s in stps {
                             let street = s.name.unwrap_or_default();
-                            let instruction = match s.maneuver {
-                                Some(m) => {
-                                    let t = m.maneuver_type.unwrap_or_else(|| "turn".to_string());
-                                    let modif = m.modifier.unwrap_or_default();
-                                    if !modif.is_empty() && !street.is_empty() {
-                                        format!("{} {} onto {}", t, modif, street)
-                                    } else if !street.is_empty() {
-                                        format!("{} onto {}", t, street)
-                                    } else {
-                                        format!("{} {}", t, modif)
-                                    }
-                                }
-                                None => {
-                                    if !street.is_empty() {
-                                        format!("Proceed onto {}", street)
-                                    } else {
-                                        "Proceed along route".to_string()
-                                    }
-                                }
+                            let (kind, modifier, bearing) = match s.maneuver {
+                                Some(m) => (m.maneuver_type.unwrap_or_else(|| "turn".into()), m.modifier.unwrap_or_default(), m.bearing_after),
+                                None => ("continue".into(), String::new(), None),
+                            };
+                            let turn = match (kind.as_str(), modifier.as_str()) {
+                                ("arrive", _) => Turn::Arrive,
+                                ("depart", _) => Turn::Straight,
+                                (_, m) if m.contains("left") => Turn::Left,
+                                (_, m) if m.contains("right") => Turn::Right,
+                                _ => Turn::Straight,
                             };
                             steps.push(RouteStep {
-                                instruction,
+                                instruction: osrm_instruction(&kind, &modifier, &street, bearing),
                                 distance_meters: s.distance,
                                 duration_seconds: s.duration,
+                                turn,
+                                street,
                             });
                         }
                     }
@@ -321,6 +405,25 @@ mod tests {
         assert_eq!(format_distance(1609.34, "imperial"), "1.0 mi");
         assert_eq!(format_distance(500.0, "metric"), "500 m");
         assert_eq!(format_distance(2500.0, "metric"), "2.5 km");
+    }
+
+    #[test]
+    fn osrm_steps_read_as_sentences() {
+        assert_eq!(osrm_instruction("depart", "", "Elm Street", Some(92.0)), "Head east on Elm Street");
+        assert_eq!(osrm_instruction("turn", "left", "Birch Street", None), "Turn left onto Birch Street");
+        assert_eq!(osrm_instruction("turn", "uturn", "", None), "Make a U-turn");
+        assert_eq!(osrm_instruction("arrive", "right", "", None), "Arrive at your destination, on the right");
+        assert_eq!(osrm_instruction("new name", "straight", "Maple Avenue", None), "Continue onto Maple Avenue");
+    }
+
+    #[test]
+    fn steps_find_their_way_and_road() {
+        assert_eq!(Turn::from_text("Turn left onto Birch Street"), Turn::Left);
+        assert_eq!(Turn::from_text("You have arrived at your destination"), Turn::Arrive);
+        assert_eq!(street_in("Turn right onto Maple Avenue."), "Maple Avenue");
+        let step = |street: &str, d: f64| RouteStep { instruction: String::new(), distance_meters: d, duration_seconds: 0.0, turn: Turn::Straight, street: street.into() };
+        let route = RouteResult { mode: TravelMode::Drive, distance_meters: 0.0, duration_seconds: 0.0, coordinates: vec![], steps: vec![step("Elm Street", 100.0), step("Maple Avenue", 900.0), step("", 2000.0)] };
+        assert_eq!(route.main_road(), Some("Maple Avenue"));
     }
 
     #[test]

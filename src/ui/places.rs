@@ -1,551 +1,659 @@
 use crate::providers::SearchResult;
-use crate::storage::Database;
+use crate::storage::{Database, FavoritePlace};
 use gtk::prelude::*;
+use nyx_ui::menu;
+use nyx_ui::sidebar;
 use nyx_ui::widgets;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// What a place is, in words ("Café", "Theatre"), from its search category.
+pub fn kind_label(category: Option<&str>) -> Option<String> {
+    let c = category?.rsplit('.').next()?.trim();
+    if c.is_empty() || ["coordinate", "home", "work", "favorite", "recent search"].contains(&c.to_lowercase().as_str()) {
+        return None;
+    }
+    let words = c.replace('_', " ");
+    let mut chars = words.chars();
+    chars.next().map(|f| f.to_uppercase().collect::<String>() + chars.as_str())
+}
+
+/// The parts of an address other than the place's own name, house number and street
+/// joined ("118 Front Street", "Old Town", …).
+fn address_parts(place: &SearchResult) -> Vec<String> {
+    let parts: Vec<&str> =
+        place.formatted_address.split(',').map(str::trim).filter(|p| !p.is_empty() && *p != place.name).collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < parts.len() {
+        let part = parts[i];
+        if part.chars().all(|c| c.is_ascii_digit()) && i + 1 < parts.len() && out.is_empty() {
+            out.push(format!("{part} {}", parts[i + 1]));
+            i += 2;
+        } else {
+            out.push(part.to_string());
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The street address, short: "118 Front Street".
+pub fn short_address(place: &SearchResult) -> Option<String> {
+    address_parts(place).into_iter().next().filter(|a| !a.starts_with("Latitude"))
+}
+
+/// The part of town or the city: "Old Town".
+pub fn area(place: &SearchResult) -> Option<String> {
+    address_parts(place).into_iter().nth(1).filter(|a| !a.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Coordinates as people read them: "41.2034, −72.9147".
+pub fn coords_text(lat: f64, lon: f64) -> String {
+    format!("{lat:.4}, {lon:.4}").replace('-', "\u{2212}")
+}
+
+/// The saved places that are this place (by name or where it is).
+pub fn saved_as(db: &Database, place: &SearchResult) -> Vec<FavoritePlace> {
+    db.list_favorites()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| f.name == place.name || ((f.lat - place.lat).abs() < 1e-5 && (f.lon - place.lon).abs() < 1e-5))
+        .collect()
+}
+
+pub fn favorite_place(f: &FavoritePlace) -> SearchResult {
+    SearchResult {
+        name: f.name.clone(),
+        formatted_address: f.address.clone(),
+        lat: f.lat,
+        lon: f.lon,
+        category: Some(f.label.clone()),
+    }
+}
+
+/// The place picked on the map: a card over the map's corner with what it is, how
+/// far, Directions, Save and Share, and its coordinates.
 pub struct PlaceCard {
     pub root: gtk::Box,
-    title_label: gtk::Label,
+    title: gtk::Label,
+    sub: gtk::Label,
+    travel: gtk::Box,
+    travel_icon: gtk::Image,
+    travel_label: gtk::Label,
+    address: gtk::Box,
     address_label: gtk::Label,
-    coords_label: gtk::Label,
-    category_label: gtk::Label,
-    fav_btn: gtk::Button,
-    current_place: Rc<RefCell<Option<SearchResult>>>,
+    coords: gtk::Label,
+    save_icon: gtk::Image,
+    save_label: gtk::Label,
+    save_btn: gtk::Button,
+    current: Rc<RefCell<Option<SearchResult>>>,
 }
 
 impl PlaceCard {
     pub fn new(
         db: Database,
-        on_back: impl Fn() + 'static,
+        on_close: impl Fn() + 'static,
         on_directions: impl Fn(SearchResult) + 'static,
-    ) -> Self {
+        on_saved: impl Fn(&str) + 'static,
+    ) -> Rc<Self> {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.set_hexpand(false);
-        root.set_vexpand(true);
-        root.set_size_request(320, -1);
+        root.add_css_class("map-card");
+        root.add_css_class("place-card");
+        root.set_halign(gtk::Align::Start);
+        root.set_valign(gtk::Align::End);
+        root.set_size_request(340, -1);
 
-        let scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::External)
-            .propagate_natural_width(false)
-            .hexpand(false)
-            .vexpand(true)
-            .build();
+        let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let names = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        names.set_hexpand(true);
+        let title = widgets::label("", "card-title");
+        title.set_wrap(true);
+        title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        title.set_max_width_chars(26);
+        names.append(&title);
+        let sub = widgets::label("", "card-sub");
+        sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        names.append(&sub);
+        head.append(&names);
+        let close = widgets::icon_button("maps-close-symbolic", "Close (Esc)");
+        close.add_css_class("card-close");
+        close.set_valign(gtk::Align::Start);
+        close.connect_clicked(move |_| on_close());
+        head.append(&close);
+        root.append(&head);
 
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        content.add_css_class("place-card");
-        content.add_css_class("panel-body");
-        content.set_hexpand(false);
-        content.set_size_request(320, -1);
+        // How far, and where.
+        let facts = gtk::Box::new(gtk::Orientation::Horizontal, 14);
+        facts.add_css_class("card-facts");
+        let fact = |icon: &str| {
+            let b = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            let img = gtk::Image::from_icon_name(icon);
+            img.set_pixel_size(14);
+            b.append(&img);
+            let l = widgets::label("", "");
+            l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            b.append(&l);
+            (b, img, l)
+        };
+        let (travel, travel_icon, travel_label) = fact("maps-car-symbolic");
+        travel.set_visible(false);
+        facts.append(&travel);
+        let (address, _, address_label) = fact("maps-pin-symbolic");
+        address.set_hexpand(true);
+        facts.append(&address);
+        root.append(&facts);
 
-        // Header with Back button and Title
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        let back_btn = widgets::bar_button("go-previous-symbolic", "Back to places");
-        back_btn.connect_clicked(move |_| on_back());
-        header.append(&back_btn);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        actions.add_css_class("card-actions");
+        let directions = card_button("maps-directions-symbolic", "Directions");
+        directions.add_css_class("suggested-action");
+        directions.set_tooltip_text(Some("Directions to here"));
+        actions.append(&directions);
 
-        let title_label = gtk::Label::new(None);
-        title_label.add_css_class("place-title");
-        title_label.set_hexpand(false);
-        title_label.set_xalign(0.0);
-        title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title_label.set_max_width_chars(24);
-        header.append(&title_label);
-        content.append(&header);
+        let save_btn = gtk::Button::new();
+        save_btn.add_css_class("card-button");
+        save_btn.add_css_class("save-button");
+        let save_face = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let save_icon = gtk::Image::from_icon_name("maps-star-symbolic");
+        save_icon.set_pixel_size(15);
+        save_icon.add_css_class("save-star");
+        save_face.append(&save_icon);
+        let save_label = gtk::Label::new(Some("Save"));
+        save_face.append(&save_label);
+        let chevron = gtk::Image::from_icon_name("maps-chevron-down-symbolic");
+        chevron.set_pixel_size(12);
+        chevron.add_css_class("chevron");
+        save_face.append(&chevron);
+        save_btn.set_child(Some(&save_face));
+        save_btn.set_tooltip_text(Some("Save this place, or make it Home or Work"));
+        actions.append(&save_btn);
 
-        // Category tag
-        let category_label = gtk::Label::new(None);
-        category_label.add_css_class("place-desc");
-        category_label.set_xalign(0.0);
-        category_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        content.append(&category_label);
+        let share = card_button("maps-share-symbolic", "Share");
+        share.set_tooltip_text(Some("Share a link to this place"));
+        actions.append(&share);
+        root.append(&actions);
 
-        // Address
-        let address_label = gtk::Label::new(None);
-        address_label.add_css_class("place-desc");
-        address_label.set_xalign(0.0);
-        address_label.set_wrap(true);
-        address_label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        address_label.set_natural_wrap_mode(gtk::NaturalWrapMode::None);
-        address_label.set_max_width_chars(28);
-        content.append(&address_label);
+        let coords_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        coords_row.add_css_class("card-coords");
+        let coords = widgets::label("", "");
+        coords_row.append(&coords);
+        let copy = widgets::icon_button("maps-copy-symbolic", "Copy the coordinates");
+        copy.add_css_class("copy-button");
+        coords_row.append(&copy);
+        root.append(&coords_row);
 
-        // Coordinates
-        let coords_label = gtk::Label::new(None);
-        coords_label.add_css_class("dim");
-        coords_label.set_xalign(0.0);
-        coords_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        content.append(&coords_label);
+        let current: Rc<RefCell<Option<SearchResult>>> = Rc::new(RefCell::new(None));
+        let card = Rc::new(Self {
+            root,
+            title,
+            sub,
+            travel,
+            travel_icon,
+            travel_label,
+            address,
+            address_label,
+            coords,
+            save_icon,
+            save_label,
+            save_btn: save_btn.clone(),
+            current: current.clone(),
+        });
 
-        // Actions row
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        actions.set_margin_top(8);
-
-        let directions_btn = gtk::Button::with_label("Directions");
-        directions_btn.add_css_class("suggested-action");
-        actions.append(&directions_btn);
-
-        let fav_btn = gtk::Button::with_label("★ Save ▾");
-        fav_btn.add_css_class("flat");
-
-        let fav_popover = gtk::Popover::new();
-        fav_popover.set_parent(&fav_btn);
-        let pop_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        pop_box.set_margin_start(4);
-        pop_box.set_margin_end(4);
-        pop_box.set_margin_top(4);
-        pop_box.set_margin_bottom(4);
-
-        let btn_fav_star = gtk::Button::with_label("★ Save as Favorite");
-        btn_fav_star.add_css_class("flat");
-        let btn_fav_home = gtk::Button::with_label("⌂ Set as Home");
-        btn_fav_home.add_css_class("flat");
-        let btn_fav_work = gtk::Button::with_label("💼 Set as Work");
-        btn_fav_work.add_css_class("flat");
-
-        pop_box.append(&btn_fav_star);
-        pop_box.append(&btn_fav_home);
-        pop_box.append(&btn_fav_work);
-        fav_popover.set_child(Some(&pop_box));
-
-        let fp_clone = fav_popover.clone();
-        fav_btn.connect_clicked(move |_| fp_clone.popup());
-        actions.append(&fav_btn);
-
-        let share_btn = gtk::Button::with_label("Share");
-        share_btn.add_css_class("flat");
-        share_btn.set_tooltip_text(Some("Share a link to this place"));
-        actions.append(&share_btn);
-
-        content.append(&actions);
-        scroller.set_child(Some(&content));
-        root.append(&scroller);
-
-        let current_place: Rc<RefCell<Option<SearchResult>>> = Rc::new(RefCell::new(None));
-        let cp_share = current_place.clone();
-        share_btn.connect_clicked(move |b| {
-            if let Some(ref p) = *cp_share.borrow() {
+        let cp = current.clone();
+        directions.connect_clicked(move |_| {
+            if let Some(p) = cp.borrow().clone() {
+                on_directions(p);
+            }
+        });
+        let cp = current.clone();
+        share.connect_clicked(move |b| {
+            if let Some(ref p) = *cp.borrow() {
                 share_place(p, b);
             }
         });
-        let cp_dir = current_place.clone();
-        directions_btn.connect_clicked(move |_| {
-            if let Some(ref p) = *cp_dir.borrow() {
-                on_directions(p.clone());
+        let cp = current.clone();
+        copy.connect_clicked(move |b| {
+            if let Some(ref p) = *cp.borrow() {
+                b.clipboard().set_text(&format!("{:.6}, {:.6}", p.lat, p.lon));
+                b.set_tooltip_text(Some("Copied"));
             }
         });
 
-        let setup_save = |btn: &gtk::Button, label: &'static str, pop: gtk::Popover, cp: Rc<RefCell<Option<SearchResult>>>, db: Database, fb: gtk::Button| {
-            btn.connect_clicked(move |_| {
-                pop.popdown();
-                if let Some(ref p) = *cp.borrow() {
-                    let _ = db.add_favorite(&p.name, label, p.lat, p.lon, &p.formatted_address);
-                    fb.set_label("★ Saved");
+        let on_saved: Rc<dyn Fn(&str)> = Rc::new(on_saved);
+        let weak = Rc::downgrade(&card);
+        save_btn.connect_clicked(move |b| {
+            let Some(card) = weak.upgrade() else { return };
+            let Some(place) = card.current.borrow().clone() else { return };
+            let saved = saved_as(&db, &place);
+            let has = |label: &str| saved.iter().any(|f| f.label == label);
+            let save = |label: &'static str, done: &'static str| {
+                let (db, place, card, on_saved) = (db.clone(), place.clone(), Rc::downgrade(&card), on_saved.clone());
+                move || {
+                    let _ = db.add_favorite(&place.name, label, place.lat, place.lon, &place.formatted_address);
+                    if let Some(card) = card.upgrade() {
+                        card.show_saved(&db);
+                    }
+                    on_saved(done);
                 }
-            });
+            };
+            let mut entries = vec![
+                menu::item("Save to Saved places", save("favorite", "Saved")).icon("maps-star-symbolic").enabled(!has("favorite")),
+                menu::item("Set as Home", save("home", "Set as Home")).icon("maps-home-symbolic").enabled(!has("home")),
+                menu::item("Set as Work", save("work", "Set as Work")).icon("maps-work-symbolic").enabled(!has("work")),
+            ];
+            if !saved.is_empty() {
+                let (db, card, on_saved) = (db.clone(), Rc::downgrade(&card), on_saved.clone());
+                entries.push(menu::separator());
+                entries.push(
+                    menu::item("Remove from Saved", move || {
+                        for f in &saved {
+                            let _ = db.remove_favorite(f.id);
+                        }
+                        if let Some(card) = card.upgrade() {
+                            card.show_saved(&db);
+                        }
+                        on_saved("Removed from saved places");
+                    })
+                    .danger(),
+                );
+            }
+            menu::popup_below(b, entries);
+        });
+        card
+    }
+
+    pub fn set_place(&self, place: &SearchResult, db: &Database) {
+        *self.current.borrow_mut() = Some(place.clone());
+        self.title.set_text(&place.name);
+        let sub = [kind_label(place.category.as_deref()), area(place)].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+        self.sub.set_text(&sub);
+        self.sub.set_visible(!sub.is_empty());
+        match short_address(place) {
+            Some(a) => {
+                self.address_label.set_text(&a);
+                self.address.set_tooltip_text(Some(&place.formatted_address));
+                self.address.set_visible(true);
+            }
+            None => self.address.set_visible(false),
+        }
+        self.coords.set_text(&coords_text(place.lat, place.lon));
+        self.set_travel(None, "");
+        self.show_saved(db);
+    }
+
+    /// How far away, and how long it takes ("7 min · 1.9 mi"); `None` hides it.
+    pub fn set_travel(&self, text: Option<&str>, icon: &str) {
+        match text {
+            Some(t) => {
+                self.travel_label.set_text(t);
+                if !icon.is_empty() {
+                    self.travel_icon.set_icon_name(Some(icon));
+                }
+                self.travel.set_visible(true);
+            }
+            None => self.travel.set_visible(false),
+        }
+    }
+
+    pub fn current(&self) -> Option<SearchResult> {
+        self.current.borrow().clone()
+    }
+
+    /// The line under the name, in place of the kind and area.
+    pub fn set_note(&self, text: &str) {
+        self.sub.set_text(text);
+        self.sub.set_visible(!text.is_empty());
+    }
+
+    fn show_saved(&self, db: &Database) {
+        let Some(place) = self.current() else { return };
+        let saved = saved_as(db, &place);
+        let has = |label: &str| saved.iter().any(|f| f.label == label);
+        let (icon, text) = if has("favorite") {
+            ("maps-star-filled-symbolic", "Saved")
+        } else if has("home") {
+            ("maps-home-symbolic", "Home")
+        } else if has("work") {
+            ("maps-work-symbolic", "Work")
+        } else {
+            ("maps-star-symbolic", "Save")
         };
-
-        setup_save(&btn_fav_star, "favorite", fav_popover.clone(), current_place.clone(), db.clone(), fav_btn.clone());
-        setup_save(&btn_fav_home, "home", fav_popover.clone(), current_place.clone(), db.clone(), fav_btn.clone());
-        setup_save(&btn_fav_work, "work", fav_popover.clone(), current_place.clone(), db.clone(), fav_btn.clone());
-
-        Self {
-            root,
-            title_label,
-            address_label,
-            coords_label,
-            category_label,
-            fav_btn,
-            current_place,
-        }
-    }
-
-    pub fn set_place(&self, place: &SearchResult, is_favorite: bool) {
-        *self.current_place.borrow_mut() = Some(place.clone());
-        self.title_label.set_text(&place.name);
-        self.address_label.set_text(&place.formatted_address);
-        self.coords_label.set_text(&format!("{:.5}, {:.5}", place.lat, place.lon));
-
-        if let Some(ref cat) = place.category {
-            self.category_label.set_text(cat);
-            self.category_label.set_visible(true);
+        self.save_icon.set_icon_name(Some(icon));
+        self.save_label.set_text(text);
+        if saved.is_empty() {
+            self.save_btn.remove_css_class("saved");
         } else {
-            self.category_label.set_visible(false);
+            self.save_btn.add_css_class("saved");
         }
-
-        if is_favorite {
-            self.fav_btn.set_label("★ Saved");
-        } else {
-            self.fav_btn.set_label("★ Save ▾");
-        }
-
-        self.root.set_visible(true);
     }
 }
 
-pub struct PlacesHubView {
-    pub root: gtk::Box,
-    saved_list: gtk::ListBox,
-    recents_list: gtk::ListBox,
-    btn_home_chip: gtk::Button,
-    btn_work_chip: gtk::Button,
+fn card_button(icon: &str, text: &str) -> gtk::Button {
+    let b = gtk::Button::new();
+    b.add_css_class("card-button");
+    let face = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let img = gtk::Image::from_icon_name(icon);
+    img.set_pixel_size(15);
+    face.append(&img);
+    face.append(&gtk::Label::new(Some(text)));
+    b.set_child(Some(&face));
+    b
+}
+
+/// Home or Work in the sidebar: its icon on its colour, how long it takes to get
+/// there, its name.
+struct Tile {
+    button: gtk::Button,
+    time: gtk::Label,
+}
+
+fn tile(icon: &str, name: &str, swatch: &str) -> Tile {
+    let button = gtk::Button::new();
+    button.add_css_class("place-tile");
+    button.set_hexpand(true);
+    let col = gtk::Box::new(gtk::Orientation::Vertical, 3);
+    let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let disc = gtk::CenterBox::new();
+    disc.add_css_class("tile-disc");
+    disc.add_css_class(&format!("section-{swatch}"));
+    let img = gtk::Image::from_icon_name(icon);
+    img.set_pixel_size(14);
+    disc.set_center_widget(Some(&img));
+    disc.set_size_request(24, 24);
+    disc.set_valign(gtk::Align::Center);
+    top.append(&disc);
+    let time = widgets::label("—", "tile-time");
+    time.add_css_class("compact-hide");
+    time.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    top.append(&time);
+    col.append(&top);
+    let label = widgets::label(name, "tile-name");
+    label.add_css_class("compact-hide");
+    col.append(&label);
+    button.set_child(Some(&col));
+    button.update_property(&[gtk::accessible::Property::Label(name)]);
+    Tile { button, time }
+}
+
+/// The swatches saved places take in turn.
+const SAVED_SWATCHES: [&str; 8] = ["coral", "green", "teal", "pink", "violet", "amber", "red", "blue"];
+
+/// The sidebar's content: Home and Work, Explore nearby, Saved and Recent.
+pub struct Library {
+    pub sidebar: Rc<sidebar::Sidebar>,
+    home: Tile,
+    work: Tile,
+    saved: gtk::Box,
+    recents: gtk::Box,
     db: Database,
-    on_select_place: Rc<dyn Fn(SearchResult)>,
+    on_select: Rc<dyn Fn(SearchResult)>,
+    on_directions: Rc<dyn Fn(SearchResult)>,
     on_toast: Rc<dyn Fn(&str)>,
+    active: RefCell<Option<SearchResult>>,
 }
 
-impl PlacesHubView {
+impl Library {
     pub fn new(
         db: Database,
-        on_select_place: impl Fn(SearchResult) + 'static,
-        on_open_directions: impl Fn() + 'static,
-        on_category_search: impl Fn(&str) + 'static,
+        on_select: impl Fn(SearchResult) + 'static,
+        on_directions: impl Fn(SearchResult) + 'static,
+        on_category: impl Fn(&str) + 'static,
+        on_add: impl Fn() + 'static,
         on_toast: impl Fn(&str) + 'static,
-    ) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.set_hexpand(false);
-        root.set_vexpand(true);
-        root.set_size_request(320, -1);
+    ) -> Rc<Self> {
+        let bar = sidebar::Sidebar::new();
+        bar.root.add_css_class("maps-sidebar");
 
-        let scroller = gtk::ScrolledWindow::new();
-        scroller.set_hexpand(false);
-        scroller.set_vexpand(true);
-        scroller.set_propagate_natural_width(false);
-        scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::External);
+        let tiles = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        tiles.add_css_class("place-tiles");
+        tiles.set_homogeneous(true);
+        let home = tile("maps-home-symbolic", "Home", "swatch-blue");
+        let work = tile("maps-work-symbolic", "Work", "swatch-amber");
+        tiles.append(&home.button);
+        tiles.append(&work.button);
+        bar.append(&tiles);
 
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
-        content.add_css_class("panel-body");
-        content.set_hexpand(false);
-        content.set_size_request(320, -1);
-
-        // --- 1. QUICK WAYPOINT CHIPS ---
-        let chips_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        chips_box.set_hexpand(false);
-
-        let make_chip = |icon: &str, label: &str| -> gtk::Button {
-            let btn = gtk::Button::new();
-            btn.add_css_class("waypoint-chip");
-            btn.set_hexpand(true);
-            let h = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-            h.set_halign(gtk::Align::Center);
-            let img = gtk::Image::from_icon_name(icon);
-            img.set_pixel_size(14);
-            h.append(&img);
-            let lbl = gtk::Label::new(Some(label));
-            h.append(&lbl);
-            btn.set_child(Some(&h));
-            btn
-        };
-
-        let btn_home_chip = make_chip("user-home-symbolic", "Home");
-        btn_home_chip.set_tooltip_text(Some("Go to Home"));
-        let btn_work_chip = make_chip("work-symbolic", "Work");
-        btn_work_chip.set_tooltip_text(Some("Go to Work"));
-        let btn_route_chip = make_chip("directions-symbolic", "Route");
-        btn_route_chip.set_tooltip_text(Some("Plan a route"));
-        btn_route_chip.connect_clicked(move |_| on_open_directions());
-
-        chips_box.append(&btn_home_chip);
-        chips_box.append(&btn_work_chip);
-        chips_box.append(&btn_route_chip);
-        content.append(&chips_box);
-
-        // --- 2. EXPLORE NEARBY CATEGORIES ---
-        let nearby_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let nearby_title = gtk::Label::new(Some("EXPLORE NEARBY"));
-        nearby_title.add_css_class("panel-section-title");
-        nearby_title.set_hexpand(true);
-        nearby_title.set_xalign(0.0);
-        nearby_header.append(&nearby_title);
-        content.append(&nearby_header);
-
-        let nearby_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        nearby_box.add_css_class("nearby-chips");
-        nearby_box.set_homogeneous(true);
-        let on_cat = Rc::new(on_category_search);
-        let categories = [
-            ("emoji-food-symbolic", "Food", "food"),
-            ("emoji-objects-symbolic", "Groceries", "groceries"),
-            ("emoji-travel-symbolic", "Fuel", "fuel"),
-            ("applications-multimedia-symbolic", "Entertainment", "entertainment"),
-            ("emoji-nature-symbolic", "Parks", "parks"),
-        ];
-
-        for (icon_name, tooltip, category) in categories {
-            let cat_btn = gtk::Button::new();
-            let icon = gtk::Image::from_icon_name(icon_name);
-            icon.set_pixel_size(16);
-            cat_btn.set_child(Some(&icon));
-            cat_btn.set_tooltip_text(Some(tooltip));
-            cat_btn.add_css_class("nearby-chip-icon");
-            let c_query = category.to_string();
-            let c_cb = on_cat.clone();
-            cat_btn.connect_clicked(move |_| c_cb(&c_query));
-            nearby_box.append(&cat_btn);
+        bar.append(&rail_divider(sidebar::ACCENT_SECTION));
+        let explore = sidebar::group_label("Explore nearby", true);
+        sidebar::set_section(&explore, sidebar::ACCENT_SECTION);
+        bar.append(&explore);
+        let on_category = Rc::new(on_category);
+        for (icon, title, category) in [
+            ("maps-food-symbolic", "Food", "food"),
+            ("maps-groceries-symbolic", "Groceries", "groceries"),
+            ("maps-fuel-symbolic", "Fuel", "fuel"),
+            ("maps-ticket-symbolic", "Things to do", "entertainment"),
+            ("maps-park-symbolic", "Parks", "parks"),
+        ] {
+            let item = sidebar::nav_item(icon, title, &format!("{title} near the middle of the map"));
+            let cb = on_category.clone();
+            item.button.connect_clicked(move |_| cb(category));
+            bar.append(&item.button);
         }
-        content.append(&nearby_box);
 
-        // --- 3. SAVED PLACES SECTION ---
-        let saved_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let saved_title = gtk::Label::new(Some("SAVED PLACES"));
-        saved_title.add_css_class("panel-section-title");
-        saved_title.set_hexpand(true);
-        saved_title.set_xalign(0.0);
-        saved_header.append(&saved_title);
-        content.append(&saved_header);
+        bar.append(&rail_divider("swatch-green"));
+        let saved_head = sidebar::group_label_with_add("Saved", false, "Save a place: find it, then choose Save", on_add);
+        sidebar::set_section(&saved_head, "swatch-green");
+        bar.append(&saved_head);
+        let saved = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        bar.append(&saved);
 
-        let saved_list = gtk::ListBox::new();
-        saved_list.add_css_class("group-list");
-        content.append(&saved_list);
+        bar.append(&rail_divider("swatch-violet"));
+        let recent_head = sidebar::group_label("Recent", false);
+        sidebar::set_section(&recent_head, "swatch-violet");
+        let clear = gtk::Button::with_label("Clear");
+        clear.add_css_class("flat");
+        clear.add_css_class("group-clear");
+        clear.set_tooltip_text(Some("Clear recent searches"));
+        clear.set_valign(gtk::Align::End);
+        recent_head.append(&clear);
+        bar.append(&recent_head);
+        let recents = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        bar.append(&recents);
 
-        // --- 4. RECENT SEARCHES SECTION ---
-        let recents_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let recents_title = gtk::Label::new(Some("RECENT SEARCHES"));
-        recents_title.add_css_class("panel-section-title");
-        recents_title.set_hexpand(true);
-        recents_title.set_xalign(0.0);
-        recents_header.append(&recents_title);
-
-        let clear_recents_btn = gtk::Button::with_label("Clear");
-        clear_recents_btn.add_css_class("flat");
-        clear_recents_btn.add_css_class("group-action-btn");
-        recents_header.append(&clear_recents_btn);
-        content.append(&recents_header);
-
-        let recents_list = gtk::ListBox::new();
-        recents_list.add_css_class("group-list");
-        content.append(&recents_list);
-
-        scroller.set_child(Some(&content));
-        root.append(&scroller);
-
-        let on_sel_rc = Rc::new(on_select_place);
-        let on_toast_rc = Rc::new(on_toast);
-
-        let hub = Self {
-            root,
-            saved_list,
-            recents_list,
-            btn_home_chip,
-            btn_work_chip,
+        let lib = Rc::new(Self {
+            sidebar: bar,
+            home,
+            work,
+            saved,
+            recents,
             db,
-            on_select_place: on_sel_rc,
-            on_toast: on_toast_rc,
-        };
-
-        // Wire home & work chips
-        hub.bind_chips();
-
-        // Wire clear recents
-        let db_clear = hub.db.clone();
-        let toast_clear = hub.on_toast.clone();
-        let rlist_clear = hub.recents_list.clone();
-        clear_recents_btn.connect_clicked(move |_| {
-            let _ = db_clear.clear_recent_searches();
-            while let Some(child) = rlist_clear.first_child() {
-                rlist_clear.remove(&child);
-            }
-            let empty = gtk::Label::new(Some("No recent searches."));
-            empty.add_css_class("dim");
-            empty.set_margin_top(8);
-            empty.set_margin_bottom(8);
-            rlist_clear.append(&empty);
-            toast_clear("Cleared recent searches");
+            on_select: Rc::new(on_select),
+            on_directions: Rc::new(on_directions),
+            on_toast: Rc::new(on_toast),
+            active: RefCell::new(None),
         });
 
-        hub.refresh();
-        hub
+        for (label, name) in [("home", "Home"), ("work", "Work")] {
+            let t = if label == "home" { &lib.home } else { &lib.work };
+            let weak = Rc::downgrade(&lib);
+            t.button.connect_clicked(move |_| {
+                let Some(lib) = weak.upgrade() else { return };
+                match lib.db.get_favorite_by_label(label) {
+                    Ok(Some(f)) => (lib.on_directions)(favorite_place(&f)),
+                    _ => (lib.on_toast)(&format!("{name} isn't set: open a place, then choose Save ▸ Set as {name}")),
+                }
+            });
+        }
+        let weak = Rc::downgrade(&lib);
+        clear.connect_clicked(move |_| {
+            let Some(lib) = weak.upgrade() else { return };
+            let _ = lib.db.clear_recent_searches();
+            lib.refresh();
+            (lib.on_toast)("Cleared recent searches");
+        });
+        let weak = Rc::downgrade(&lib);
+        lib.sidebar.connect_compact(move |compact| {
+            if let Some(lib) = weak.upgrade() {
+                apply_rail(&lib.sidebar.root, compact);
+            }
+        });
+
+        lib.refresh();
+        lib
     }
 
-    fn bind_chips(&self) {
-        let db_home = self.db.clone();
-        let on_sel_home = self.on_select_place.clone();
-        let on_toast_home = self.on_toast.clone();
-        self.btn_home_chip.connect_clicked(move |_| {
-            if let Ok(Some(home)) = db_home.get_favorite_by_label("home") {
-                on_sel_home(SearchResult {
-                    name: home.name,
-                    formatted_address: home.address,
-                    lat: home.lat,
-                    lon: home.lon,
-                    category: Some("home".into()),
-                });
-            } else {
-                on_toast_home("Home not set. Star a place and choose 'Set as Home'!");
-            }
-        });
+    /// The place on the card, marked in Saved.
+    pub fn set_active(&self, place: Option<&SearchResult>) {
+        *self.active.borrow_mut() = place.cloned();
+        self.refresh();
+    }
 
-        let db_work = self.db.clone();
-        let on_sel_work = self.on_select_place.clone();
-        let on_toast_work = self.on_toast.clone();
-        self.btn_work_chip.connect_clicked(move |_| {
-            if let Ok(Some(work)) = db_work.get_favorite_by_label("work") {
-                on_sel_work(SearchResult {
-                    name: work.name,
-                    formatted_address: work.address,
-                    lat: work.lat,
-                    lon: work.lon,
-                    category: Some("work".into()),
-                });
-            } else {
-                on_toast_work("Work not set. Star a place and choose 'Set as Work'!");
-            }
-        });
+    pub fn has_active(&self) -> bool {
+        self.active.borrow().is_some()
+    }
+
+    /// Travel time to Home or Work ("12 min"), or `None` when it isn't known.
+    pub fn set_time(&self, label: &str, time: Option<&str>) {
+        let t = if label == "home" { &self.home } else { &self.work };
+        t.time.set_text(time.unwrap_or("—"));
     }
 
     pub fn refresh(&self) {
-        self.refresh_saved();
-        self.refresh_recents();
-    }
-
-    fn refresh_saved(&self) {
-        while let Some(child) = self.saved_list.first_child() {
-            self.saved_list.remove(&child);
-        }
-
-        if let Ok(places) = self.db.list_favorites() {
-            if places.is_empty() {
-                let empty = gtk::Label::new(Some("No saved places yet."));
-                empty.add_css_class("dim");
-                empty.set_margin_top(8);
-                empty.set_margin_bottom(8);
-                self.saved_list.append(&empty);
-                return;
-            }
-
-            for place in places {
-                let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-                row.add_css_class("search-result-row");
-
-                let icon_name = match place.label.as_str() {
-                    "home" => "user-home-symbolic",
-                    "work" => "work-symbolic",
-                    _ => "starred-symbolic",
-                };
-                let icon = gtk::Image::from_icon_name(icon_name);
-                icon.set_pixel_size(16);
-                row.append(&icon);
-
-                let info_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
-                info_box.set_hexpand(true);
-
-                let name_lbl = gtk::Label::new(Some(&place.name));
-                name_lbl.add_css_class("place-title");
-                name_lbl.set_xalign(0.0);
-                name_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                name_lbl.set_max_width_chars(22);
-                info_box.append(&name_lbl);
-
-                let addr_lbl = gtk::Label::new(Some(&place.address));
-                addr_lbl.add_css_class("place-desc");
-                addr_lbl.set_xalign(0.0);
-                addr_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                addr_lbl.set_max_width_chars(24);
-                info_box.append(&addr_lbl);
-
-                row.append(&info_box);
-
-                // Delete button on right
-                let del_btn = widgets::bar_button("window-close-symbolic", "Remove");
-                del_btn.add_css_class("dim");
-                let db_del = self.db.clone();
-                let pid = place.id;
-                let toast_del = self.on_toast.clone();
-                let r_clone = row.clone();
-                let sl_clone = self.saved_list.clone();
-                del_btn.connect_clicked(move |_| {
-                    let _ = db_del.remove_favorite(pid);
-                    sl_clone.remove(&r_clone);
-                    toast_del("Removed from saved places");
-                });
-                row.append(&del_btn);
-
-                let pl_clone = place.clone();
-                let on_sel = self.on_select_place.clone();
-                let gesture = gtk::GestureClick::new();
-                gesture.connect_released(move |_, _, _, _| {
-                    on_sel(SearchResult {
-                        name: pl_clone.name.clone(),
-                        formatted_address: pl_clone.address.clone(),
-                        lat: pl_clone.lat,
-                        lon: pl_clone.lon,
-                        category: Some(pl_clone.label.clone()),
-                    });
-                });
-                row.add_controller(gesture);
-
-                self.saved_list.append(&row);
+        let (home, work) = (self.db.get_favorite_by_label("home").ok().flatten(), self.db.get_favorite_by_label("work").ok().flatten());
+        for (t, name, place) in [(&self.home, "Home", &home), (&self.work, "Work", &work)] {
+            t.button.set_tooltip_text(Some(&match place {
+                Some(p) => format!("Directions to {name}: {}", p.name),
+                None => format!("{name} isn't set"),
+            }));
+            if place.is_none() {
+                t.time.set_text("—");
             }
         }
-    }
 
-    fn refresh_recents(&self) {
-        while let Some(child) = self.recents_list.first_child() {
-            self.recents_list.remove(&child);
+        clear(&self.saved);
+        let favorites: Vec<FavoritePlace> =
+            self.db.list_favorites().unwrap_or_default().into_iter().filter(|f| f.label == "favorite").collect();
+        if favorites.is_empty() {
+            self.saved.append(&empty_note("No saved places yet"));
+        }
+        let active = self.active.borrow().clone();
+        for (i, f) in favorites.iter().enumerate() {
+            let place = favorite_place(f);
+            let row = place_row(None, Some(SAVED_SWATCHES[i % SAVED_SWATCHES.len()]), &f.name);
+            if active.as_ref().is_some_and(|a| a.name == f.name || ((a.lat - f.lat).abs() < 1e-5 && (a.lon - f.lon).abs() < 1e-5)) {
+                row.add_css_class("active");
+            }
+            let (sel, p) = (self.on_select.clone(), place.clone());
+            row.connect_clicked(move |_| sel(p.clone()));
+            let (dir, db, toast, id, p) = (self.on_directions.clone(), self.db.clone(), self.on_toast.clone(), f.id, place);
+            let saved = self.saved.clone();
+            menu::on_right_click(&row, move |w, x, y| {
+                let (dir, p, db, toast, saved, row) = (dir.clone(), p.clone(), db.clone(), toast.clone(), saved.clone(), w.clone());
+                menu::popup_at(
+                    w,
+                    x,
+                    y,
+                    vec![
+                        menu::item("Directions", move || dir(p.clone())).icon("maps-directions-symbolic"),
+                        menu::separator(),
+                        menu::item("Remove from Saved", move || {
+                            let _ = db.remove_favorite(id);
+                            saved.remove(&row);
+                            toast("Removed from saved places");
+                        })
+                        .danger(),
+                    ],
+                );
+            });
+            self.saved.append(&row);
         }
 
-        if let Ok(recents) = self.db.list_recent_searches() {
-            if recents.is_empty() {
-                let empty = gtk::Label::new(Some("No recent searches."));
-                empty.add_css_class("dim");
-                empty.set_margin_top(8);
-                empty.set_margin_bottom(8);
-                self.recents_list.append(&empty);
-                return;
-            }
-
-            for rec in recents {
-                let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-                row.add_css_class("search-result-row");
-
-                let icon = gtk::Image::from_icon_name("document-open-recent-symbolic");
-                icon.set_pixel_size(16);
-                row.append(&icon);
-
-                let info_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
-                info_box.set_hexpand(true);
-
-                let name_lbl = gtk::Label::new(Some(&rec.query));
-                name_lbl.add_css_class("place-title");
-                name_lbl.set_xalign(0.0);
-                name_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                name_lbl.set_max_width_chars(22);
-                info_box.append(&name_lbl);
-
-                let addr_lbl = gtk::Label::new(Some(&rec.formatted_address));
-                addr_lbl.add_css_class("place-desc");
-                addr_lbl.set_xalign(0.0);
-                addr_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                addr_lbl.set_max_width_chars(24);
-                info_box.append(&addr_lbl);
-
-                row.append(&info_box);
-
-                let rc_clone = rec.clone();
-                let on_sel = self.on_select_place.clone();
-                let gesture = gtk::GestureClick::new();
-                gesture.connect_released(move |_, _, _, _| {
-                    on_sel(SearchResult {
-                        name: rc_clone.query.clone(),
-                        formatted_address: rc_clone.formatted_address.clone(),
-                        lat: rc_clone.lat,
-                        lon: rc_clone.lon,
-                        category: Some("Recent Search".into()),
-                    });
-                });
-                row.add_controller(gesture);
-
-                self.recents_list.append(&row);
-            }
+        clear(&self.recents);
+        let recents = self.db.list_recent_searches().unwrap_or_default();
+        if recents.is_empty() {
+            self.recents.append(&empty_note("No recent searches"));
         }
+        for r in recents {
+            let row = place_row(Some("maps-history-symbolic"), None, &r.query);
+            row.set_tooltip_text(Some(&r.query));
+            let place = SearchResult {
+                name: r.query.clone(),
+                formatted_address: r.formatted_address.clone(),
+                lat: r.lat,
+                lon: r.lon,
+                category: None,
+            };
+            let sel = self.on_select.clone();
+            row.connect_clicked(move |_| sel(place.clone()));
+            self.recents.append(&row);
+        }
+        self.sidebar.refresh();
+        apply_rail(&self.sidebar.root, self.sidebar.is_compact());
     }
 }
 
-/// A link anyone can open: the place on OpenStreetMap.
-pub fn place_url(lat: f64, lon: f64) -> String {
-    format!("https://www.openstreetmap.org/?mlat={lat:.6}&mlon={lon:.6}#map=17/{lat:.6}/{lon:.6}")
+fn clear(b: &gtk::Box) {
+    while let Some(c) = b.first_child() {
+        b.remove(&c);
+    }
+}
+
+fn empty_note(text: &str) -> gtk::Label {
+    let l = widgets::label(text, "nav-empty");
+    l.add_css_class("compact-hide");
+    l
+}
+
+/// A nav row for a place: a history icon, or a dot in its swatch.
+fn place_row(icon: Option<&str>, swatch: Option<&str>, title: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("nav-item");
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    if let Some(icon) = icon {
+        let image = gtk::Image::from_icon_name(icon);
+        image.add_css_class("nav-icon");
+        content.append(&image);
+    }
+    if let Some(swatch) = swatch {
+        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        dot.add_css_class("place-dot");
+        dot.add_css_class(&format!("section-swatch-{swatch}"));
+        dot.set_valign(gtk::Align::Center);
+        content.append(&dot);
+    }
+    let label = widgets::label(title, "nav-label");
+    label.set_hexpand(true);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.add_css_class("compact-hide");
+    content.append(&label);
+    button.set_child(Some(&content));
+    button.set_tooltip_text(Some(title));
+    button.update_property(&[gtk::accessible::Property::Label(title)]);
+    button
+}
+
+/// In the icon rail, a short bar in a section's colour where its heading was.
+fn rail_divider(section: &str) -> gtk::Separator {
+    let bar = gtk::Separator::new(gtk::Orientation::Horizontal);
+    bar.add_css_class("nav-divider");
+    bar.add_css_class("compact-show");
+    bar.add_css_class(&format!("section-{section}"));
+    bar.set_visible(false);
+    bar
+}
+
+/// What the shared sidebar's compact mode doesn't cover: the rail's bars, and Home
+/// and Work stacked as squares around their discs.
+fn apply_rail(root: &gtk::Box, compact: bool) {
+    fn walk(w: &gtk::Widget, compact: bool) {
+        if w.has_css_class("compact-show") {
+            w.set_visible(compact);
+        }
+        if let Some(tiles) = w.downcast_ref::<gtk::Box>().filter(|b| b.has_css_class("place-tiles")) {
+            tiles.set_orientation(if compact { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal });
+        }
+        if w.has_css_class("place-tile") {
+            w.set_halign(if compact { gtk::Align::Center } else { gtk::Align::Fill });
+        }
+        let mut child = w.first_child();
+        while let Some(c) = child {
+            walk(&c, compact);
+            child = c.next_sibling();
+        }
+    }
+    walk(root.upcast_ref(), compact);
 }
 
 /// Nyx Share's Share Sheet for a link to the place.
@@ -567,4 +675,42 @@ fn share_place(place: &SearchResult, button: &gtk::Button) {
             }
         },
     );
+}
+
+/// A link anyone can open: the place on OpenStreetMap.
+pub fn place_url(lat: f64, lon: f64) -> String {
+    format!("https://www.openstreetmap.org/?mlat={lat:.6}&mlon={lon:.6}#map=17/{lat:.6}/{lon:.6}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn place(name: &str, address: &str, category: Option<&str>) -> SearchResult {
+        SearchResult { name: name.into(), formatted_address: address.into(), lat: 0.0, lon: 0.0, category: category.map(Into::into) }
+    }
+
+    #[test]
+    fn addresses_read_short() {
+        let p = place(
+            "Ryman Auditorium",
+            "Ryman Auditorium, 116, Rep. John Lewis Way North, Downtown, Nashville, Tennessee, 37219, United States",
+            Some("theatre"),
+        );
+        assert_eq!(short_address(&p).as_deref(), Some("116 Rep. John Lewis Way North"));
+        assert_eq!(area(&p).as_deref(), Some("Downtown"));
+        assert_eq!(kind_label(p.category.as_deref()).as_deref(), Some("Theatre"));
+
+        let photon = place("Frist Art Museum", "919 Broadway, Nashville, Tennessee, 37203, United States", Some("museum"));
+        assert_eq!(short_address(&photon).as_deref(), Some("919 Broadway"));
+        assert_eq!(area(&photon).as_deref(), Some("Nashville"));
+        assert_eq!(kind_label(Some("catering.fast_food")).as_deref(), Some("Fast food"));
+        assert_eq!(kind_label(Some("favorite")), None);
+        assert_eq!(short_address(&place("36.1, -86.7", "Latitude: 36.1, Longitude: -86.7", Some("Coordinate"))), None);
+    }
+
+    #[test]
+    fn coordinates_use_a_real_minus() {
+        assert_eq!(coords_text(41.20341, -72.91472), "41.2034, \u{2212}72.9147");
+    }
 }

@@ -1,13 +1,12 @@
-/* Maps on Nyx 2.0: only Maps' own parts. One surface: the header and the side panel
-   share the window's background; cards and spacing, not lines, separate what's in the
-   panel. Controls over the map float on it with a soft shadow. */
+/* Maps on Nyx 2.0: only Maps' own parts. The look follows
+   nyx-design/mockups/revamp (Maps, option A): the library in the sidebar, the place
+   and the route as cards over the map, and the map's own controls on it. */
 
 /* ---------- Header ---------- */
 
-.header-status {
-    font-size: 11.5px;
-    color: @theme_dim_text;
-    font-feature-settings: "tnum";
+.key-hint {
+    color: @theme_text_tertiary;
+    font-size: 0.846em;
 }
 
 window.maps-window .app-header button.bar-button {
@@ -31,8 +30,8 @@ window.maps-window .app-header entry.maps-search-entry {
     min-height: 32px;
     margin-top: 7px;
     margin-bottom: 7px;
-    padding: 0 10px;
-    min-width: 220px;
+    padding: 0 52px 0 10px;
+    min-width: 200px;
     border: 1px solid transparent;
     border-radius: 8px;
     background: @field;
@@ -46,183 +45,454 @@ window.maps-window .app-header entry.maps-search-entry:focus-within {
     outline: none;
 }
 
-/* The map style picker: a quiet text button like the icon buttons beside it. */
-window.maps-window button.style-selector {
-    min-height: 32px;
+window.maps-window .app-header button.new-button {
+    min-height: 30px;
     padding: 0 10px;
-    border: none;
-    border-radius: var(--nyx-radius-small);
-    background: transparent;
+    border-radius: 7px;
+    background: @field;
+    box-shadow: inset 0 0 0 1px @hairline;
+    font-weight: 600;
+}
+
+window.maps-window .app-header button.new-button:hover {
+    background: mix(@field, @theme_text, 0.06);
+}
+
+window.maps-window .app-header button.new-button.open {
+    background: alpha(@theme_accent, 0.14);
+    box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.5);
+}
+
+window.maps-window .app-header button.new-button .key-hint {
+    margin-left: 2px;
+    font-weight: 400;
+}
+
+/* ---------- Sidebar ---------- */
+
+.settings-navigation:not(.compact) {
+    min-width: 228px;
+}
+
+.settings-navigation button.nav-item.active {
     box-shadow: none;
+}
+
+/* Home and Work: two tiles, each its icon on its colour, the trip's time and its name. */
+.place-tiles {
+    margin: 2px 0 6px;
+}
+
+window.maps-window button.place-tile {
+    padding: 8px 10px;
+    border-radius: 11px;
+    background: @theme_card;
+    box-shadow: inset 0 0 0 1px @hairline;
+    min-height: 0;
+}
+
+window.maps-window button.place-tile:hover {
+    background: mix(@theme_card, @theme_text, 0.04);
+}
+
+.place-tile .tile-disc {
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: 999px;
+    background: currentColor;
+}
+
+.place-tile .tile-disc image {
+    color: #ffffff;
+}
+
+.place-tile .tile-time {
+    color: @theme_text;
+    font-size: 1.385em;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+}
+
+.place-tile .tile-name {
     color: @theme_dim_text;
-    font-size: 12.5px;
+    font-size: 0.923em;
     font-weight: 500;
 }
 
-window.maps-window button.style-selector:hover {
-    background: @row_hover;
+/* The icon rail: each tile a square around its disc. */
+.settings-navigation.compact button.place-tile {
+    padding: 6px;
+    min-width: 24px;
+}
+
+.settings-navigation.compact .place-tiles {
+    margin: 2px 0 4px;
+}
+
+/* The icon rail's mark where a group starts: a short bar in its colour. */
+.settings-navigation separator.nav-divider {
+    margin: 8px 14px 6px;
+    min-height: 2px;
+    border-radius: 1px;
+    background: @theme_divider;
+}
+
+.settings-navigation .place-dot {
+    min-width: 10px;
+    min-height: 10px;
+    margin: 0 3px;
+    border-radius: 999px;
+    background: currentColor;
+}
+
+.settings-navigation .nav-empty {
+    padding: 4px 10px 6px;
+    color: @theme_text_tertiary;
+    font-size: 0.923em;
+}
+
+window.maps-window .nav-group-row button.group-clear {
+    min-height: 20px;
+    padding: 0 6px;
+    margin: 0 2px 2px 0;
+    color: @theme_text_tertiary;
+    font-size: 0.846em;
+    font-weight: 500;
+}
+
+window.maps-window .nav-group-row button.group-clear:hover {
     color: @theme_text;
 }
 
-/* ---------- Over the map ---------- */
+/* ---------- On the map ---------- */
 
-.map-floating-controls {
-    margin: 16px;
+window.maps-window .segmented.map-style {
+    padding: 2px;
+    background: @theme_popover;
+    border-radius: var(--nyx-radius-small);
+    box-shadow: 0 4px 14px alpha(@theme_shadow, 0.35), 0 0 0 1px @hairline;
+}
+
+window.maps-window .segmented.map-style button.segment {
+    min-height: 26px;
+    padding: 0 10px;
+    font-weight: 500;
 }
 
 window.maps-window button.map-control-btn {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 32px;
+    min-height: 32px;
     padding: 0;
     border: none;
     border-radius: var(--nyx-radius-small);
     background: @theme_popover;
-    box-shadow: 0 4px 14px alpha(@theme_shadow, 0.45);
-    color: @theme_dim_text;
-}
-
-window.maps-window button.map-control-btn image {
-    color: inherit;
+    box-shadow: 0 4px 14px alpha(@theme_shadow, 0.35), 0 0 0 1px @hairline;
+    color: @theme_text;
 }
 
 window.maps-window button.map-control-btn:hover {
     background: mix(@theme_popover, @theme_text, 0.06);
-    color: @theme_text;
 }
 
 window.maps-window button.map-control-btn:active {
     background: mix(@theme_popover, @theme_text, 0.1);
 }
 
-.map-attribution {
-    margin: 0 70px 6px 0;
-    padding: 2px 8px;
+/* Zoom in and out: one block, a line between them. */
+.map-zoom {
     border-radius: var(--nyx-radius-small);
-    background: alpha(@theme_bg, 0.72);
-    color: @theme_dim_text;
-    font-size: 10.5px;
+    background: @theme_popover;
+    box-shadow: 0 4px 14px alpha(@theme_shadow, 0.35), 0 0 0 1px @hairline;
 }
 
-.map-pin-user {
+window.maps-window .map-zoom button.map-control-btn {
+    background: transparent;
+    box-shadow: none;
+}
+
+window.maps-window .map-zoom button.map-control-btn:hover {
+    background: mix(@theme_popover, @theme_text, 0.06);
+}
+
+window.maps-window .map-zoom button.map-control-btn:first-child {
+    border-radius: var(--nyx-radius-small) var(--nyx-radius-small) 0 0;
+    border-bottom: 1px solid @theme_divider;
+}
+
+window.maps-window .map-zoom button.map-control-btn:last-child {
+    border-radius: 0 0 var(--nyx-radius-small) var(--nyx-radius-small);
+}
+
+.map-attribution {
+    margin: 0 12px 8px 0;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: alpha(@theme_bg, 0.8);
+    color: @theme_text_tertiary;
+    font-size: 0.77em;
+}
+
+/* The map's scale: small quiet labels on a translucent chip, like the credit. */
+window.maps-window map-scale {
+    margin: 0 0 8px 12px;
+}
+
+window.maps-window map-scale label {
+    min-width: 0;
+    padding: 1px 6px;
+    border: none;
+    border-radius: 5px;
+    background: alpha(@theme_bg, 0.72);
+    box-shadow: none;
+    color: @theme_dim_text;
+    font-size: 10.5px;
+    font-feature-settings: "tnum";
+}
+
+.map-pin {
     color: @theme_accent;
 }
 
-.map-pin-start {
-    color: @theme_success;
-}
-
-.map-pin-accent {
-    color: @theme_danger;
-}
-
-/* ---------- Side panel ---------- */
-
-.context-panel {
-    min-width: 320px;
-}
-
-.panel-header {
-    min-height: 46px;
-    padding: 6px 14px;
-}
-
-.panel-title {
+.map-pin-label {
+    margin-left: 2px;
+    color: @theme_text;
+    font-size: 13px;
     font-weight: 600;
-    font-size: 11px;
-    color: @theme_text_tertiary;
-    letter-spacing: 0.06em;
+    text-shadow: 0 0 2px @theme_bg, 0 0 3px @theme_bg, 0 0 4px @theme_bg;
 }
 
-.panel-body {
-    padding: 12px 14px;
+.map-you-halo {
+    border-radius: 999px;
+    background: alpha(#3d8bfd, 0.2);
 }
 
-/* Places | Directions: a segmented control. */
-.panel-segmented {
-    background: @field;
+.map-you {
+    min-width: 11px;
+    min-height: 11px;
+    border-radius: 999px;
+    background: #3d8bfd;
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 3px alpha(#000000, 0.35);
+}
+
+/* ---------- Cards over the map ---------- */
+
+.map-card {
+    background: @theme_popover;
+    border-radius: var(--nyx-radius-card);
+    box-shadow: 0 8px 26px alpha(@theme_shadow, 0.4), 0 0 0 1px @hairline;
+}
+
+.place-card {
+    padding: 14px 14px 12px;
+}
+
+.map-card .card-title {
+    color: @theme_text;
+    font-size: 1.231em;
+    font-weight: 600;
+}
+
+.map-card .card-sub {
+    color: @theme_dim_text;
+}
+
+window.maps-window .map-card button.card-close {
+    min-width: 26px;
+    min-height: 26px;
+    margin: -4px -4px 0 0;
+    padding: 0;
+    color: @theme_dim_text;
+}
+
+.card-facts {
+    margin: 12px 0;
+    color: @theme_dim_text;
+    font-size: 0.923em;
+}
+
+.card-actions {
+    margin-bottom: 0;
+}
+
+window.maps-window .map-card button.card-button {
+    min-height: 30px;
+    padding: 0 12px;
+    border: none;
     border-radius: var(--nyx-radius-small);
+    background: @field;
+    box-shadow: inset 0 0 0 1px @hairline;
+    color: @theme_text;
+    font-weight: 600;
+}
+
+window.maps-window .map-card button.card-button:hover {
+    background: mix(@theme_popover, @theme_text, 0.06);
+}
+
+window.maps-window .map-card button.card-button.suggested-action {
+    background: @theme_accent;
+    box-shadow: none;
+    color: @theme_on_accent;
+}
+
+window.maps-window .map-card button.card-button.suggested-action:hover {
+    background: mix(@theme_accent, #ffffff, 0.08);
+}
+
+.map-card .save-button image.save-star {
+    color: @theme_warning;
+}
+
+.map-card .save-button image.chevron {
+    color: @theme_dim_text;
+    margin-left: -2px;
+}
+
+.card-coords {
+    margin-top: 10px;
+    padding-top: 7px;
+    border-top: 1px solid @theme_divider;
+    color: @theme_text_tertiary;
+    font-size: 0.846em;
+    font-feature-settings: "tnum";
+}
+
+window.maps-window .card-coords button.copy-button {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    color: @theme_text_tertiary;
+}
+
+window.maps-window .card-coords button.copy-button image {
+    -gtk-icon-size: 13px;
+}
+
+/* Directions. */
+.route-card {
+    padding: 12px 14px 8px;
+}
+
+.route-head {
+    margin-bottom: 10px;
+}
+
+.route-title {
+    color: @theme_text;
+    font-size: 1.077em;
+    font-weight: 600;
+}
+
+window.maps-window .segmented.route-modes {
     padding: 2px;
 }
 
-window.maps-window button.segment-btn {
+window.maps-window .segmented.route-modes button.segment {
     min-height: 28px;
-    padding: 0 10px;
-    border-radius: 5px;
-    border: none;
-    background: transparent;
-    box-shadow: none;
-    color: @theme_dim_text;
-    font-size: 12.5px;
-    font-weight: 500;
+    padding: 0 6px;
 }
 
-window.maps-window button.segment-btn:hover {
-    color: @theme_text;
+.route-ends {
+    margin: 12px 0 10px;
 }
 
-window.maps-window button.segment-btn.active {
-    background: @theme_raised;
-    color: @theme_text;
-    box-shadow: 0 1px 3px alpha(@theme_shadow, 0.35);
+.route-rail {
+    min-width: 14px;
+    padding: 12px 0;
 }
 
-.panel-section-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: @theme_text_tertiary;
-    letter-spacing: 0.06em;
+.route-rail .rail-from {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 999px;
+    background: #3d8bfd;
+    box-shadow: 0 0 0 2px @theme_popover, 0 0 0 3px alpha(#3d8bfd, 0.4);
 }
 
-window.maps-window button.waypoint-chip,
-window.maps-window button.nearby-chip {
-    min-height: 26px;
-    padding: 0 9px;
-    border: none;
-    border-radius: var(--nyx-radius-small);
-    background: @field;
-    box-shadow: none;
-    color: @theme_dim_text;
-    font-size: 12px;
+.route-rail .rail-line {
+    min-width: 0;
+    margin: 3px 0;
+    border-left: 2px dotted @theme_text_tertiary;
 }
 
-window.maps-window button.waypoint-chip:hover,
-window.maps-window button.nearby-chip:hover {
-    background: @row_hover;
-    color: @theme_text;
+.route-rail .rail-to {
+    color: @theme_accent;
 }
 
-window.maps-window button.waypoint-chip image {
-    color: inherit;
-}
-
-window.maps-window button.nearby-chip-icon {
+window.maps-window entry.waypoint-entry {
     min-height: 32px;
-    min-width: 32px;
-    padding: 0;
-    border: none;
     border-radius: var(--nyx-radius-small);
+    border: 1px solid transparent;
     background: @field;
-    box-shadow: none;
+    box-shadow: inset 0 0 0 1px @hairline;
+    color: @theme_text;
+    padding: 0 8px;
+}
+
+window.maps-window entry.waypoint-entry:focus-within {
+    background: alpha(@theme_text, 0.07);
+}
+
+window.maps-window .route-ends button.swap-button {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
     color: @theme_dim_text;
 }
 
-window.maps-window button.nearby-chip-icon:hover {
-    background: @row_hover;
-    color: @theme_text;
-}
-
-window.maps-window button.nearby-chip-icon image {
-    color: inherit;
-}
-
-window.maps-window button.group-action-btn {
-    font-size: 11.5px;
-    padding: 0 4px;
+.route-status {
+    margin: 0 2px 8px;
     color: @theme_dim_text;
 }
 
-window.maps-window button.group-action-btn:hover {
+.route-summary {
+    padding: 10px 12px;
+    border-radius: var(--nyx-radius-small);
+    background: mix(@theme_popover, @theme_accent, 0.12);
+    box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.3);
+}
+
+.route-summary .route-time {
     color: @theme_text;
+    font-size: 1.385em;
+    font-weight: 600;
+}
+
+.route-summary .route-detail {
+    color: @theme_dim_text;
+    font-size: 0.923em;
+}
+
+.route-steps {
+    margin-top: 8px;
+}
+
+.route-step {
+    padding: 9px 2px;
+    border-bottom: 1px solid @theme_divider;
+}
+
+.route-step:last-child {
+    border-bottom: none;
+}
+
+.route-step image {
+    color: @theme_dim_text;
+}
+
+.route-step.arrive image {
+    color: @theme_accent;
+}
+
+.route-step .step-text {
+    color: @theme_text;
+}
+
+.route-step .step-distance {
+    color: @theme_text_tertiary;
+    font-size: 0.923em;
+    font-feature-settings: "tnum";
 }
 
 /* ---------- Search results ---------- */
@@ -240,8 +510,9 @@ window.maps-window button.group-action-btn:hover {
     background-color: @row_hover;
 }
 
-.search-result-row:selected {
-    background-color: @nav_active;
+.search-result-row.highlighted {
+    background-color: mix(@theme_popover, @theme_accent, 0.14);
+    box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.35);
 }
 
 .place-title {
@@ -254,81 +525,9 @@ window.maps-window button.group-action-btn:hover {
     color: @theme_dim_text;
 }
 
-/* ---------- Directions ---------- */
-
-.directions-box {
-    margin-bottom: 12px;
-}
-
-window.maps-window entry.waypoint-entry {
-    min-height: 32px;
-    border-radius: var(--nyx-radius-small);
-    border: 1px solid transparent;
-    background: @field;
-    color: @theme_text;
-    padding: 0 8px;
-}
-
-window.maps-window entry.waypoint-entry:focus-within {
-    background: alpha(@theme_text, 0.07);
-}
-
-window.maps-window button.travel-mode-btn {
-    min-height: 30px;
-    padding: 0 8px;
-    border: none;
-    border-radius: var(--nyx-radius-small);
-    background: transparent;
-    box-shadow: none;
-    color: @theme_dim_text;
-    font-size: 12.5px;
-}
-
-window.maps-window button.travel-mode-btn:hover {
-    background-color: @row_hover;
-    color: @theme_text;
-}
-
-window.maps-window button.travel-mode-btn.active {
-    background: alpha(@theme_accent, 0.16);
-    color: @theme_accent;
-}
-
-window.maps-window button.travel-mode-btn image {
-    color: inherit;
-}
-
-.route-summary-card,
-.place-card {
-    border-radius: var(--nyx-radius-card);
-    padding: 14px;
-    margin: 6px 0;
-    background-color: @theme_card;
-}
-
-.route-stat-value {
-    font-weight: 600;
-    font-size: 16px;
-    color: @theme_text;
-    font-feature-settings: "tnum";
-}
-
-.route-stat-label {
-    font-size: 12px;
-    color: @theme_dim_text;
-}
-
-.step-row {
-    padding: 8px 6px;
-}
-
-.step-text {
-    color: @theme_text;
-}
-
-.step-distance {
-    font-size: 12px;
-    color: @theme_dim_text;
+.place-distance {
+    font-size: 11.5px;
+    color: @theme_text_tertiary;
     font-feature-settings: "tnum";
 }
 
@@ -347,27 +546,4 @@ window.maps-window button.travel-mode-btn image {
     padding: 10px 18px;
     margin-bottom: 24px;
     box-shadow: 0 8px 24px alpha(@theme_shadow, 0.5);
-}
-
-/* The map's scale: small quiet labels on a translucent chip, like the credit. */
-window.maps-window map-scale {
-    margin: 0 0 6px 8px;
-}
-
-window.maps-window map-scale label {
-    min-width: 0;
-    padding: 1px 6px;
-    border: none;
-    border-radius: 5px;
-    background: alpha(@theme_bg, 0.72);
-    box-shadow: none;
-    color: @theme_dim_text;
-    font-size: 10.5px;
-    font-feature-settings: "tnum";
-}
-
-.place-distance {
-    font-size: 11.5px;
-    color: @theme_text_tertiary;
-    font-feature-settings: "tnum";
 }
