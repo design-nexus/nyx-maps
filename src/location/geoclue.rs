@@ -43,7 +43,7 @@ pub async fn locate(fixes: Sender<Result<GeoLocation>>, patience: Duration) {
     let fallback = if crate::settings::get().ip_location {
         request_ip_location().await
     } else {
-        Err(anyhow!("The location service didn't answer. Turn on Location in the system settings, or let Maps guess from your IP address in its settings."))
+        Err(anyhow!("The location service didn't answer. Maps can guess from your IP address instead: turn that on in its settings."))
     };
     let _ = fixes.send(fallback).await;
 }

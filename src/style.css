@@ -470,6 +470,12 @@ window.maps-window .route-ends button.swap-button {
     font-size: 0.923em;
 }
 
+.route-source {
+    margin-top: 6px;
+    color: @theme_dim_text;
+    font-size: 0.846em;
+}
+
 .route-steps {
     margin-top: 8px;
 }

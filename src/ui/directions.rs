@@ -20,6 +20,7 @@ pub struct RouteCard {
     summary: gtk::Box,
     time: gtk::Label,
     detail: gtk::Label,
+    source: gtk::Label,
     steps: gtk::Box,
     origin_at: Rc<RefCell<Option<(f64, f64)>>>,
     dest_at: Rc<RefCell<Option<(f64, f64)>>>,
@@ -148,6 +149,16 @@ impl RouteCard {
         summary.set_visible(false);
         root.append(&summary);
 
+        // Without a Geoapify key, directions come from OSRM's demo server.
+        let source = widgets::label(
+            "From OSRM's public demo server, which can be slow or stop answering. A Geoapify key in Settings › Providers routes through Geoapify.",
+            "route-source",
+        );
+        source.set_wrap(true);
+        source.set_xalign(0.0);
+        source.set_visible(false);
+        root.append(&source);
+
         let steps = gtk::Box::new(gtk::Orientation::Vertical, 0);
         steps.add_css_class("route-steps");
         let scroller = gtk::ScrolledWindow::builder()
@@ -169,6 +180,7 @@ impl RouteCard {
             summary,
             time,
             detail,
+            source,
             steps,
             origin_at,
             dest_at,
@@ -325,6 +337,7 @@ impl RouteCard {
                 Err(e) => {
                     card.say(&format!("No route: {e}"));
                     card.summary.set_visible(false);
+                    card.source.set_visible(false);
                     clear(&card.steps);
                 }
             }
@@ -341,6 +354,7 @@ impl RouteCard {
             None => distance,
         });
         self.summary.set_visible(true);
+        self.source.set_visible(route.demo_server);
 
         clear(&self.steps);
         let dest = self.dest.text();

@@ -143,6 +143,10 @@ pub struct RouteResult {
     pub duration_seconds: f64,
     pub coordinates: Vec<(f64, f64)>,
     pub steps: Vec<RouteStep>,
+    /// From OSRM's public demo server (no Geoapify key, or Geoapify had no route), which
+    /// limits use and promises no availability.
+    #[serde(default)]
+    pub demo_server: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -293,6 +297,7 @@ pub async fn calculate_route(
                     duration_seconds,
                     coordinates,
                     steps,
+                    demo_server: false,
                 });
             }
         } else if resp.status().as_u16() == 429 {
@@ -355,6 +360,7 @@ pub async fn calculate_route(
                 duration_seconds: route.duration,
                 coordinates,
                 steps,
+                demo_server: true,
             });
         }
     }
@@ -422,7 +428,7 @@ mod tests {
         assert_eq!(Turn::from_text("You have arrived at your destination"), Turn::Arrive);
         assert_eq!(street_in("Turn right onto Maple Avenue."), "Maple Avenue");
         let step = |street: &str, d: f64| RouteStep { instruction: String::new(), distance_meters: d, duration_seconds: 0.0, turn: Turn::Straight, street: street.into() };
-        let route = RouteResult { mode: TravelMode::Drive, distance_meters: 0.0, duration_seconds: 0.0, coordinates: vec![], steps: vec![step("Elm Street", 100.0), step("Maple Avenue", 900.0), step("", 2000.0)] };
+        let route = RouteResult { mode: TravelMode::Drive, distance_meters: 0.0, duration_seconds: 0.0, coordinates: vec![], steps: vec![step("Elm Street", 100.0), step("Maple Avenue", 900.0), step("", 2000.0)], demo_server: false };
         assert_eq!(route.main_road(), Some("Maple Avenue"));
     }
 

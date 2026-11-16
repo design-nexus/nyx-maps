@@ -77,7 +77,7 @@ fn providers_group(p: &Page) {
 
     let row = widgets::row(
         "Geoapify API key",
-        "Used for location search and routing (3,000 free credits/day).",
+        "Used for location search and directions (3,000 free credits/day). Without it, directions come from OSRM's public demo server.",
         Some(key_entry.upcast_ref()),
     );
     group.add(&row);
