@@ -113,6 +113,12 @@ window.maps-window button.place-tile:hover {
     font-feature-settings: "tnum";
 }
 
+.place-tile .tile-time.unset {
+    color: @theme_dim_text;
+    font-size: 1em;
+    font-weight: 500;
+}
+
 .place-tile .tile-name {
     color: @theme_dim_text;
     font-size: 0.923em;

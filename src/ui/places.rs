@@ -520,6 +520,12 @@ impl Library {
             if place.is_none() {
                 t.time.set_text("Not set");
             }
+            // A time is a big figure; "Not set" is a note, and wouldn't fit at that size.
+            if place.is_none() {
+                t.time.add_css_class("unset");
+            } else {
+                t.time.remove_css_class("unset");
+            }
         }
 
         clear(&self.saved);
