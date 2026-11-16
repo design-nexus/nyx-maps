@@ -515,10 +515,10 @@ impl Library {
         for (t, name, place) in [(&self.home, "Home", &home), (&self.work, "Work", &work)] {
             t.button.set_tooltip_text(Some(&match place {
                 Some(p) => format!("Directions to {name}: {}", p.name),
-                None => format!("{name} isn't set"),
+                None => format!("{name} isn't set: open a place, then choose Save ▸ Set as {name}"),
             }));
             if place.is_none() {
-                t.time.set_text("—");
+                t.time.set_text("Not set");
             }
         }
 
