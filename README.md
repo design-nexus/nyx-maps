@@ -26,7 +26,7 @@ A lightweight, native Linux desktop mapping application built with Rust and GTK4
 
 ## Installation
 
-On NyxOS, install Maps from the Store. On Arch Linux or Omarchy:
+On NyxOS, install Maps from the Store or with `nyx install nyx-maps`. On Arch Linux or Omarchy:
 
 ### Prerequisites (Arch Linux / Omarchy)
 ```bash
