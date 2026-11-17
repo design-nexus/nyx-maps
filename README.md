@@ -1,6 +1,6 @@
 # Nyx Maps
 
-A lightweight, native Linux desktop mapping application built with Rust and GTK4. Part of the Nyx desktop suite for Omarchy.
+A lightweight, native Linux desktop mapping application built with Rust and GTK4. Part of the Nyx desktop suite, for NyxOS and Omarchy.
 
 ![Maps Icon](data/icons/io.github.design_nexus.nyx.Maps.svg)
 
@@ -25,6 +25,8 @@ A lightweight, native Linux desktop mapping application built with Rust and GTK4
 ---
 
 ## Installation
+
+On NyxOS, install Maps from the Store. On Arch Linux or Omarchy:
 
 ### Prerequisites (Arch Linux / Omarchy)
 ```bash
